@@ -235,7 +235,7 @@ man_pages = [
 #  dir menu entry, description, category)
 texinfo_documents = [
   ('index', 'nsqbook', u'nsqbook Documentation',
-   u'samuelyao', 'nsqbook', 'One line description of project.',
+   u'samuelyao', 'nsqbook', 'nsq官方文档翻译',
    'Miscellaneous'),
 ]
 

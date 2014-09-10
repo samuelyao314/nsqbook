@@ -2,26 +2,27 @@ TCP协议约定
 =============
 .. _tcp-protocol:
 
-NSQ协议足够的简单，任何语言都实现其客户端。我们提供官方的python和golang client libraries。
+NSQ协议足够的简单，任何语言都可以实现其客户端。我们提供官方的python和golang客户端库。
 
 nsqd进程监听一个可配置的TCP端口，接受客户端的连接。
 
-连接后，客户端必须发送一个4字节的"magic"标识表示他们将沟通什么版本的协议（升级容易）。
+连接后，客户端必须发送一个4字节的"magic"标识表示他们将沟通什么版本的协议（方便之后的升级）。
 
-V2 (4字节ASCII [space][space][V][2])，是对消费者基于推模式的流协议。
-认证后，客户端可以选择发送IDENTIFY命令提供自定义的元数据（比如，举例来说，更具描述性的标识），
-并协商功能。为了开始使用消息，客户端必须SUB到一个通道。
+V2协议(4字节ASCII, [space][space][V][2])，是基于推模式的流协议。
+
+认证后，客户端可以选择发送IDENTIFY命令提供自定义的元数据（比如，更多描述的标识），
+并协商功能。为了得到消息，客户端必须 **SUB** 一个通道。
 
 在订阅客户端被置于0的 **RDY** 状态, 这意味着没有信息将被发送到客户端。
 当客户准备好接收消息,  会发生命令，更新其 **RDY** 状态到它准备处理的消息数，例如100。
 不需要额外的命令，100条短信将被传递到客户端（递减服务器端对应的这个客户端的RDY计数）。
 
-V2协议支持客户端心跳协议。时间间隔默认是30秒，可以配置。每过30秒， nsqd会发送 **_heartbeat_** 。
-如果客户端处于空闲状态，就要发送 **NOP** 回复。 如果连续2次，nsqd没有收到回复，nsqd就会超时，
-强行关闭客户端连接。 **IDENTIFY** 命令可以用来修改/禁用此行为。
+V2协议支持客户端心跳协议。默认每隔30秒， nsqd会发送 **_heartbeat_** 。
+如果客户端处于空闲状态，就要回复 **NOP** 。 如果连续2次， **nsqd** 没有收到回复，判定超时，强行关闭客户端连接。
+**IDENTIFY** 命令可以用来修改/禁用此行为。
 
 .. note:: * 除非特殊说明，所有的整数都是网络序
-          * 合法的topic和channel的名称, 只能是字符 **[.a-zA-z0-9_-]** , 并且长度满足>1, <= 64 
+          * 合法的topic和channel的名称, 只能是字符 **[.a-zA-z0-9_-]** , 并且长度满足>1, <= 64
 
 
 命令字
@@ -106,7 +107,7 @@ json字段如下
 
     Default: `<client_library_name>/<version>`
 
-* **msg_timeout**, 服务端交付给客户端的消息，超时时间
+* **msg_timeout**,  配置每个消息，nsqd交付给客户端的超时时间, 单位是millisecond
 
 成功:::
 
@@ -120,5 +121,180 @@ json字段如下
 
 SUB
 ^^^^^^^^^
+订阅特定的 topic/channel
+
+::
+
+    SUB <topic_name> <channel_name>\n
+
+    <topic_name> - a valid string
+    <channel_name> - a valid string (optionally having #ephemeral suffix)
+
+成功返回: ::
+
+    OK
+
+失败返回: ::
+
+    E_INVALID
 
 
+PUB
+^^^^^^^^^^
+发布指定topic的消息
+
+::
+
+    PUB <topic_name>\n
+    [ 4-byte size in bytes ][ N-byte binary data ]
+
+    <topic_name> - a valid string
+
+成功返回：::
+
+    OK
+
+失败返回: ::
+
+    E_INVALID
+    E_BAD_TOPIC
+    E_BAD_MESSAGE
+    E_PUB_FAILED
+
+
+RDY
+^^^^^^^
+更新 **RDY** 状态, 说明你已经准备好接收消息。
+
+注意： **--max-rdy-count** 配置最大值
+
+::
+
+    RDY <count>\n
+    <count> - a string representation of integer N where 0 < N <= configured_max
+
+成功没有返回包。
+
+失败返回: ::
+
+    E_INVALID
+
+
+FIN
+^^^^^^^^^
+成功处理消息
+
+::
+
+    FIN <message_id>\n
+    <message_id> - message id as 16-byte hex string
+
+成功没有返回。
+
+失败返回：::
+
+   E_INVALID
+   E_FIN_FAILED
+
+
+REQ
+^^^^^^^^^^
+消息处理失败，需要重发
+
+::
+
+    REQ <message_id> <timeout>\n
+
+    <message_id> - message id as 16-byte hex string
+    <timeout> - a string representation of integer N where N <= configured max timeout
+        0 is a special case that will not defer re-queueing
+
+成功没有返回。
+
+失败返回： ::
+
+    E_INVALID
+    E_REQ_FAILED
+
+
+TOUCH
+^^^^^^^^^
+重置指定消息的超时时间
+
+::
+
+    TOUCH <message_id>\n
+
+    <message_id> - the hex id of the message
+
+成功没有返回。
+
+失败返回: ::
+
+    E_INVALID
+    E_TOUCH_FAILED
+
+
+CLS
+^^^^^^^^^^
+不再接受消息
+
+::
+
+    CLS\n
+
+成功返回： ::
+
+    CLOSE_WAIT
+
+失败返回: ::
+
+    E_INVALID
+
+NOP
+^^^^^^
+No-op, 客户端回复nsqd的心跳包协议
+
+::
+
+    NOP\n
+
+
+AUTH
+^^^^^^
+如果 **IDENTIFY** 回复提示 **auth_required=true**, 客户端就可以发送 **AUTH**  指令。
+如果 **auth_required** 不存在或者为false, 客户端就不需要授权.
+
+
+Data Format
+^^^^^^^^^^^^^^^
+nsqd 发给client的数据， 支持多种回复
+
+::
+
+    [x][x][x][x][x][x][x][x][x][x][x][x]...
+    |  (int32) ||  (int32) || (binary)
+    |  4-byte  ||  4-byte  || N-byte
+    ------------------------------------...
+        size     frame type     data
+
+客户端可能受到以下几种回复
+
+::
+
+    FrameTypeResponse int32 = 0
+    FrameTypeError    int32 = 1
+    FrameTypeMessage  int32 = 2
+
+消息格式如下
+
+::
+
+    [x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x][x]...
+    |       (int64)        ||    ||      (hex string encoded in ASCII)           || (binary)
+    |       8-byte         ||    ||                 16-byte                      || N-byte
+    ------------------------------------------------------------------------------------------...
+      nanosecond timestamp    ^^                   message ID                       message body
+                             (uint16)
+                              2-byte
+                              attempts
